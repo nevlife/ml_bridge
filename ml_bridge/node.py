@@ -40,7 +40,7 @@ from rosbag2_dataset.torch import BagDataset
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import String
 
-from .spec import Decoder, load_spec
+from .spec import Decoder, load_spec, Renamed
 
 MODES = ('train', 'infer')
 
@@ -77,8 +77,11 @@ class BridgeNode(Node):
         """Hand the model a dataset of the bags; without bags, its own data."""
         dataset = None
         if self.model_context.bags:
-            dataset = BagDataset(self.model_context.bags, self.spec.topics, sync=self.spec.sync(),
-                                 transform=self.decoder)
+            # Remapping (-r) renames bag topics as it renames subscriptions.
+            names = {topic: self.resolve_topic_name(topic) for topic in self.spec.topics}
+            dataset = BagDataset(self.model_context.bags, [names[t] for t in self.spec.topics],
+                                 sync=self.spec.sync(names),
+                                 transform=Renamed(names, self.decoder))
             self.get_logger().info(
                 f'{len(dataset)} samples from {len(self.model_context.bags)} bags')
         self.model.train(dataset, self.model_context)

@@ -74,14 +74,17 @@ class Spec:
     def topics(self):
         return tuple(i.topic for i in self.inputs)
 
-    def sync(self):
-        """Return the Bag.synced and BagDataset sync options."""
+    def sync(self, names=None):
+        """Return the Bag.synced and BagDataset sync options, topics renamed by names."""
+        def name(topic):
+            return names[topic] if names else topic
+
         return {
-            'reference': self.reference,
-            'tolerance_ns': {i.topic: i.tolerance_ns for i in self.inputs
+            'reference': name(self.reference),
+            'tolerance_ns': {name(i.topic): i.tolerance_ns for i in self.inputs
                              if i.topic != self.reference},
-            'optional': [i.topic for i in self.inputs if i.optional],
-            'windows': {i.topic: i.window for i in self.inputs if i.window},
+            'optional': [name(i.topic) for i in self.inputs if i.optional],
+            'windows': {name(i.topic): i.window for i in self.inputs if i.window},
             'time_source': self.time,
         }
 
@@ -123,6 +126,21 @@ def load_spec(source):
     _check_keys('output', output, {'topic', 'type'})
     return Spec(tuple(inputs), reference, time, round(data.get('max_wait_ms', 100) * MS),
                 output.get('topic', '~/output'), output.get('type'))
+
+
+class Renamed:
+    """Give the keys of a bag sample the spec's topic names, then decode."""
+
+    def __init__(self, names, decoder):
+        self.spec_names = {bag: spec for spec, bag in names.items()}
+        self.decoder = decoder
+
+    def __call__(self, sample):
+        renamed = {}
+        for key, value in sample.items():
+            topic, at, suffix = key.partition('@')
+            renamed[self.spec_names.get(topic, topic) + at + suffix] = value
+        return self.decoder(renamed)
 
 
 class Decoder:

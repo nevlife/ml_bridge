@@ -90,9 +90,9 @@ def context():
     rclpy.try_shutdown(context=context)
 
 
-def _node(context, mode, spec_path, bags=()):
+def _node(context, mode, spec_path, bags=(), cli_args=None):
     from ml_bridge.node import BridgeNode
-    return BridgeNode(context=context, parameter_overrides=[
+    return BridgeNode(context=context, cli_args=cli_args, parameter_overrides=[
         Parameter('spec', value=str(spec_path)), Parameter('mode', value=mode),
         Parameter('model', value='fake_model'),
         Parameter('bags', value=[str(b) for b in bags] or [''])])
@@ -122,6 +122,15 @@ def test_infer_matches_train(context, bag, bag_events, tmp_path):
     assert len(trained) >= 25
     assert all(isinstance(s['/cam'][1], np.ndarray) and s['/cam'][1].shape == (2, 3, 3)
                for s in fake_model.trained)
+    renamed_spec = dict(SPEC, inputs={'/camera': SPEC['inputs']['/cam'],
+                                      '/odom': SPEC['inputs']['/odom']})
+    renamed_path = tmp_path / 'renamed.yaml'
+    renamed_path.write_text(yaml.safe_dump(renamed_spec))
+    fake_model.trained.clear()
+    _node(context, 'train', renamed_path, [bag], ['--ros-args', '-r', '/camera:=/cam']).train()
+    assert [_keys(dict(s, **{'/cam': s['/camera']})) for s in fake_model.trained] == list(
+        trained.values())
+    assert all('/cam' not in s for s in fake_model.trained)
 
     bridge = _node(context, 'infer', spec_path)
     source = rclpy.create_node('source', context=context)

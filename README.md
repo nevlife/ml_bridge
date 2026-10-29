@@ -49,6 +49,9 @@ ros2 run ml_bridge run --ros-args -p spec:=spec.yaml -p model:=my_models.detecto
   -p mode:=infer -p weights:=/data/runs/detector/best.pt
 ```
 
+Topic remapping (`-r /camera/image:=/my_camera/image_raw`) applies to both modes:
+`train` reads the remapped topics from the bags, and samples keep the spec's names.
+
 In `infer` mode the node subscribes best effort with short queues, runs the model
 on the newest finished sample, and publishes the result on the output topic and
 `~/input_info` (JSON: reference time, skipped samples, input times). Messages
