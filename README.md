@@ -18,7 +18,7 @@ inputs:
     window: {every_ms: 500, past: 4, future: 0, tolerance_ms: 30}
 reference: /camera/image      # default: first input
 time: header                  # header (header.stamp) or log (bag log time, receive time live)
-max_wait_ms: 100              # live: release a sample after this wait even if a topic lags
+max_wait_ms: 100              # live: release a sample once any input is this much newer
 output: {topic: ~/output, type: vision_msgs/msg/Detection2DArray}
 ```
 

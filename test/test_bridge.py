@@ -36,7 +36,7 @@ SPEC = {
                   'window': {'every_ms': 200, 'past': 3, 'tolerance_ms': 30}},
     },
     'time': 'header',
-    'max_wait_ms': 10_000,
+    'max_wait_ms': 300,
 }
 
 
@@ -61,7 +61,7 @@ def bag_events():
         odom = Odometry()
         odom.pose.pose.position.x = float(i)
         _set_stamp(odom, stamp)
-        events.append(('/odom', stamp + 5 * MS, odom))
+        events.append(('/odom', stamp + 25 * MS, odom))
     events.sort(key=lambda event: event[1])
     return events
 
@@ -150,7 +150,7 @@ def test_infer_matches_train(context, bag, bag_events, tmp_path):
         executor.spin_once(timeout_sec=0.05)
 
     inferred = [_keys(s) for s in fake_model.inferred]
-    assert len(inferred) >= 20
+    assert len(inferred) >= len(trained) - 2
     assert all(trained[key[0]] == key for key in inferred)
     assert any(None in key[3] for key in inferred)
     executor.shutdown()

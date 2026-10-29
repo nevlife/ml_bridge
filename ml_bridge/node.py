@@ -68,6 +68,7 @@ class BridgeNode(Node):
             bags=list(self.declare_parameter('bags', ['']).value))
         self.model_context.bags = [bag for bag in self.model_context.bags if bag]
         self.decoder = Decoder(self.spec)
+        self.newest_ns = 0
         self.received = 0
         self.used = 0
         if self.mode == 'infer':
@@ -109,7 +110,10 @@ class BridgeNode(Node):
         except ValueError as error:
             self.get_logger().warn(f'{topic}: {error}', throttle_duration_sec=5.0)
             return
-        samples = self.live.ready(now_ns=receive_ns, max_wait_ns=self.spec.max_wait_ns)
+        # Waiting is measured on the sample clock: header stamps of a replayed bag are far
+        # behind the wall clock.
+        self.newest_ns = max(self.newest_ns, clock_ns)
+        samples = self.live.ready(now_ns=self.newest_ns, max_wait_ns=self.spec.max_wait_ns)
         if not samples:
             return
         self.received += len(samples)
