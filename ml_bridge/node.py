@@ -19,10 +19,10 @@
 # THE SOFTWARE.
 
 """
-Node that trains a model on bags or runs it on live topics with the same samples.
+Node that runs a model on live topics.
 
-The model module provides train(dataset, context), infer(state, sample), and
-optionally load(context) whose result is the state passed to infer.
+The model module provides infer(state, sample) and optionally load(context), whose
+result is the state passed to infer. Training runs without ROS: see training.py.
 """
 
 import functools
@@ -36,13 +36,10 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosbag2_dataset import LiveSampler
-from rosbag2_dataset.torch import BagDataset
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import String
 
-from .spec import Decoder, load_spec, Renamed
-
-MODES = ('train', 'infer')
+from .spec import Decoder, load_spec
 
 
 def _stamp_ns(message):
@@ -51,43 +48,20 @@ def _stamp_ns(message):
 
 
 class BridgeNode(Node):
-    """Train on bags (mode train) or run on subscriptions (mode infer)."""
+    """Run a model on subscriptions."""
 
     def __init__(self, **kwargs):
         super().__init__('ml_bridge', **kwargs)
         self.spec = load_spec(self.declare_parameter('spec', Parameter.Type.STRING).value)
-        self.mode = self.declare_parameter('mode', 'infer').value
-        if self.mode not in MODES:
-            raise ValueError(f'mode must be one of {MODES}, not {self.mode!r}')
         self.model = importlib.import_module(
             self.declare_parameter('model', Parameter.Type.STRING).value)
         self.model_context = SimpleNamespace(
             spec=self.spec, logger=self.get_logger(),
-            weights=self.declare_parameter('weights', '').value,
-            out_dir=self.declare_parameter('out_dir', '').value,
-            bags=list(self.declare_parameter('bags', ['']).value))
-        self.model_context.bags = [bag for bag in self.model_context.bags if bag]
+            weights=self.declare_parameter('weights', '').value)
         self.decoder = Decoder(self.spec)
         self.newest_ns = 0
         self.received = 0
         self.used = 0
-        if self.mode == 'infer':
-            self._start_infer()
-
-    def train(self):
-        """Hand the model a dataset of the bags; without bags, its own data."""
-        dataset = None
-        if self.model_context.bags:
-            # Remapping (-r) renames bag topics as it renames subscriptions.
-            names = {topic: self.resolve_topic_name(topic) for topic in self.spec.topics}
-            dataset = BagDataset(self.model_context.bags, [names[t] for t in self.spec.topics],
-                                 sync=self.spec.sync(names),
-                                 transform=Renamed(names, self.decoder))
-            self.get_logger().info(
-                f'{len(dataset)} samples from {len(self.model_context.bags)} bags')
-        self.model.train(dataset, self.model_context)
-
-    def _start_infer(self):
         load = getattr(self.model, 'load', None)
         self.state = load(self.model_context) if load else None
         self.live = LiveSampler(self.spec.rule())
@@ -136,10 +110,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = BridgeNode()
     try:
-        if node.mode == 'train':
-            node.train()
-        else:
-            rclpy.spin(node)
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:

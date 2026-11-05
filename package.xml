@@ -3,9 +3,12 @@
 <package format="3">
   <name>ml_bridge</name>
   <version>0.1.0</version>
-  <description>Run a learning model on ROS topics and train it on the recorded bags with the same samples.</description>
+  <description>Run a learning model on ROS topics, with the samples of its training</description>
   <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
   <license>MIT</license>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rosbag2_dataset</exec_depend>
   <exec_depend>rosidl_runtime_py</exec_depend>

@@ -20,6 +20,9 @@
 
 """Check spec parsing."""
 
+import subprocess
+import sys
+
 from ml_bridge.spec import Decoder, load_spec
 import numpy as np
 import pytest
@@ -57,3 +60,9 @@ def test_images_become_rgb():
     sample = Decoder(spec)({'@time': 0, '/a': (5, image), '/a@past': [None, (4, image)]})
     np.testing.assert_array_equal(sample['/a'][1], [[[2, 1, 0], [6, 5, 4]]])
     assert sample['/a@past'][0] is None and sample['/a@past'][1][0] == 4
+
+
+def test_training_does_not_need_ros():
+    code = ("import sys; import ml_bridge.training; "
+            "assert 'rclpy' not in sys.modules, 'training imported rclpy'")
+    subprocess.run([sys.executable, '-c', code], check=True)

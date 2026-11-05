@@ -90,12 +90,17 @@ def context():
     rclpy.try_shutdown(context=context)
 
 
-def _node(context, mode, spec_path, bags=(), cli_args=None):
+def _node(context, spec_path):
     from ml_bridge.node import BridgeNode
-    return BridgeNode(context=context, cli_args=cli_args, parameter_overrides=[
-        Parameter('spec', value=str(spec_path)), Parameter('mode', value=mode),
-        Parameter('model', value='fake_model'),
-        Parameter('bags', value=[str(b) for b in bags] or [''])])
+    return BridgeNode(context=context, parameter_overrides=[
+        Parameter('spec', value=str(spec_path)), Parameter('model', value='fake_model')])
+
+
+def _train(spec_path, bag, remap=None):
+    import fake_model
+    from ml_bridge.spec import load_spec
+    from ml_bridge.training import make_dataset
+    fake_model.train(make_dataset(load_spec(str(spec_path)), [bag], remap), None)
 
 
 def _keys(sample):
@@ -117,7 +122,7 @@ def test_infer_matches_train(context, bag, bag_events, tmp_path):
     fake_model.trained.clear()
     fake_model.inferred.clear()
 
-    _node(context, 'train', spec_path, [bag]).train()
+    _train(spec_path, bag)
     trained = {s['@time']: _keys(s) for s in fake_model.trained}
     assert len(trained) >= 25
     assert all(isinstance(s['/cam'][1], np.ndarray) and s['/cam'][1].shape == (2, 3, 3)
@@ -127,12 +132,12 @@ def test_infer_matches_train(context, bag, bag_events, tmp_path):
     renamed_path = tmp_path / 'renamed.yaml'
     renamed_path.write_text(yaml.safe_dump(renamed_spec))
     fake_model.trained.clear()
-    _node(context, 'train', renamed_path, [bag], ['--ros-args', '-r', '/camera:=/cam']).train()
+    _train(renamed_path, bag, {'/camera': '/cam'})
     assert [_keys(dict(s, **{'/cam': s['/camera']})) for s in fake_model.trained] == list(
         trained.values())
     assert all('/cam' not in s for s in fake_model.trained)
 
-    bridge = _node(context, 'infer', spec_path)
+    bridge = _node(context, spec_path)
     source = rclpy.create_node('source', context=context)
     publishers = {name: source.create_publisher(type(message), name, 100)
                   for name, _, message in bag_events}

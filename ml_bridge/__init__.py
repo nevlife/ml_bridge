@@ -18,4 +18,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Run a learning model on ROS topics and train it on the recorded bags."""
+"""Run a learning model on ROS topics, with the samples of its training."""

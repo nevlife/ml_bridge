@@ -36,8 +36,9 @@ setup(
     zip_safe=False,
     maintainer='nevlife',
     maintainer_email='nevlife000720@gmail.com',
-    description='Run a learning model on ROS topics and train it on the recorded bags',
+    description='Run a learning model on ROS topics, with the samples of its training',
     license='MIT',
     tests_require=['pytest'],
-    entry_points={'console_scripts': ['run = ml_bridge.node:main']},
+    entry_points={'console_scripts': ['run = ml_bridge.node:main',
+                                      'train = ml_bridge.training:main']},
 )

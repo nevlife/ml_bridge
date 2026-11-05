@@ -1,8 +1,8 @@
 # ml_bridge
 
-Run a learning model on ROS topics, and train it on recorded bags with the same
-samples. One spec names the input topics and how they align; the training dataset
-and the live subscriptions both build samples with the
+Run a learning model on ROS topics, and train it on recorded bags without ROS, with
+the same samples. One spec names the input topics and how they align; the training
+dataset and the live subscriptions both build samples with the
 [rosbag2_dataset](https://github.com/nevlife/rosbag2_dataset) `SampleRule`, and
 decode messages with the same code.
 
@@ -28,34 +28,45 @@ windows. Images are NumPy arrays (`HxW` or `HxWxC`): `bgr8`, `bgra8`, and `rgba8
 become RGB copies, other encodings keep their channel order as views (read-only
 for bags). Other messages stay messages.
 
-## Model module
+## Model package
+
+A model is one ROS 2 package with a spec, a launch file, and two modules:
 
 ```python
-def load(context): ...            # optional; returns the state given to infer
-def train(dataset, context): ...  # dataset: map-style samples of the bags, or None
-def infer(state, sample): ...     # returns an output message or None
+def train(dataset, context): ...  # training module, no ROS: dataset of the bags, or None
+def load(context): ...            # inference module, optional; returns the state
+def infer(state, sample): ...     # inference module: returns an output message or None
 ```
 
-`context` has `spec`, `logger`, `weights`, `out_dir`, and `bags`. Batching,
-shuffling, augmentation, and optimization stay in the model's own training code,
-for example a PyTorch `DataLoader` over `dataset`.
+The training `context` has `spec`, `logger`, `weights`, `out_dir`, and `bags`; the
+inference `context` has `spec`, `logger`, and `weights`. Batching, shuffling,
+augmentation, and optimization stay in the model's own training code.
+
+A launch file names the package and its topic arguments:
+
+```python
+from ml_bridge.launch import infer_launch
+
+
+def generate_launch_description():
+    return infer_launch('my_model_ros', {'camera': '/camera/image'})
+```
 
 ## Run
 
 ```bash
-ros2 run ml_bridge run --ros-args -p spec:=spec.yaml -p model:=my_models.detector \
-  -p mode:=train -p bags:="['/data/run1']" -p out_dir:=/data/runs/detector
-ros2 run ml_bridge run --ros-args -p spec:=spec.yaml -p model:=my_models.detector \
-  -p mode:=infer -p weights:=/data/runs/detector/best.pt
+python -m ml_bridge.training --spec spec.yaml --model my_model_ros.training \
+  --bags /data/run1 --remap /camera/image:=/my_camera --out-dir /data/runs
+ros2 launch my_model_ros infer.launch.py camera:=/my_camera weights:=/data/runs/best.pt
 ```
 
-Topic remapping (`-r /camera/image:=/my_camera/image_raw`) applies to both modes:
-`train` reads the remapped topics from the bags, and samples keep the spec's names.
+`ml_bridge.training` does not import rclpy. Put `rosbag2_dataset`, `ml_bridge`, and the
+model package on `PYTHONPATH` to train on a machine without ROS.
 
-In `infer` mode the node subscribes best effort with short queues, runs the model
-on the newest finished sample, and publishes the result on the output topic and
-`~/input_info` (JSON: reference time, skipped samples, input times). Messages
-without a stamp get the sample's reference time.
+The node subscribes best effort with short queues, runs the model on the newest
+finished sample, and publishes the result on the output topic and `~/input_info` (JSON:
+reference time, skipped samples, input times). Messages without a stamp get the
+sample's reference time.
 
 ## License
 
