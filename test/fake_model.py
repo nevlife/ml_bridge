@@ -22,6 +22,7 @@
 
 trained = []
 inferred = []
+on_infer = None
 
 
 def load(context):
@@ -34,4 +35,7 @@ def train(dataset, context):
 
 def infer(state, sample):
     assert state == 'state'
-    inferred.append(sample)
+    if on_infer is None:
+        inferred.append(sample)
+    else:
+        on_infer(sample)

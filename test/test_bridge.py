@@ -161,3 +161,97 @@ def test_infer_matches_train(context, bag, bag_events, tmp_path):
     executor.shutdown()
     source.destroy_node()
     bridge.destroy_node()
+
+
+def _in_shared_memory(array):
+    address = array.ctypes.data
+    with open('/proc/self/maps') as maps:
+        for line in maps:
+            span, *rest = line.split()
+            low, high = (int(part, 16) for part in span.split('-'))
+            if low <= address < high:
+                return rest[-1].startswith('/dev/shm/') and rest[-1] != span
+    return False
+
+
+def _flux_run(context, tmp_path, spec, parameters, count, on_infer, lag=0):
+    """Publish rgb8 frames 10 ms apart on /cam; a sample comes lag frames after its own."""
+    import threading
+    import time
+    import fake_model
+    import yaml
+    from ml_bridge.node import BridgeNode
+    flux = pytest.importorskip('flux')
+    image = pytest.importorskip('sensor_msgs_flux.image').Image
+    spec_path = tmp_path / 'spec.yaml'
+    spec_path.write_text(yaml.safe_dump(spec))
+    fake_model.on_infer = on_infer
+    fake_model.inferred.clear()
+    bridge = BridgeNode(context=context, parameter_overrides=[
+        Parameter('spec', value=str(spec_path)), Parameter('model', value='fake_model'),
+        Parameter('transport', value='flux')] + parameters)
+    source = rclpy.create_node('source', context=context)
+    publisher = flux.Publisher(source, '/cam', fingerprint=image.FINGERPRINT__,
+                               slot_size=1 << 16, slot_count=4)
+    executor = flux.Executor()
+    for subscription in bridge.flux_inputs:
+        executor.add(subscription)
+    executor.add_node(bridge)
+    spinner = threading.Thread(target=executor.spin)
+    spinner.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while not all(s.attached for s in bridge.flux_inputs) and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert all(s.attached for s in bridge.flux_inputs)
+        for i in range(count):
+            deadline = time.monotonic() + 5.0
+            while True:
+                builder = image.build__(publisher)
+                if builder:
+                    break
+                assert time.monotonic() < deadline, 'the channel stopped: a view is held'
+                time.sleep(0.001)
+            builder.set__header__stamp(1, i * 10 * MS)
+            builder.height, builder.width, builder.step = 2, 3, 9
+            builder.encoding = 'rgb8'
+            builder.alloc__data(18)[:] = np.arange(18, dtype=np.uint8) + i
+            assert not flux.faulted(builder.commit__())
+            deadline = time.monotonic() + 2.0
+            while bridge.used <= i - lag and time.monotonic() < deadline:
+                time.sleep(0.001)
+            assert bridge.used > i - lag, f'frame {i} did not arrive'
+    finally:
+        executor.stop()
+        spinner.join()
+        fake_model.on_infer = None
+    return bridge, source
+
+
+def test_flux_single_input_reads_the_slot(context, tmp_path):
+    seen = []
+
+    def check(sample):
+        _, pixels = sample['/cam']
+        seen.append((sample['@time'], pixels.shape, int(pixels[0, 0, 0]),
+                     _in_shared_memory(pixels)))
+
+    spec = {'inputs': {'/cam': {'type': 'sensor_msgs/msg/Image'}}, 'time': 'header'}
+    bridge, source = _flux_run(context, tmp_path, spec, [], 30, check)
+    assert bridge.in_callback
+    assert seen == [(10**9 + i * 10 * MS, (2, 3, 3), i, True) for i in range(30)]
+    bridge.destroy_node()
+    source.destroy_node()
+
+
+def test_flux_held_frames_are_copied(context, tmp_path):
+    import fake_model
+    spec = {'inputs': {'/cam': {'type': 'sensor_msgs/msg/Image',
+                                'window': {'every_ms': 10, 'past': 1, 'tolerance_ms': 1}}},
+            'time': 'header'}
+    # More frames than the 4 slots, all held by the sampler or by fake_model.inferred.
+    bridge, source = _flux_run(context, tmp_path, spec, [], 10, None, lag=1)
+    assert not bridge.in_callback
+    assert [int(s['/cam'][1][0, 0, 0]) for s in fake_model.inferred] == list(range(9))
+    bridge.destroy_node()
+    source.destroy_node()

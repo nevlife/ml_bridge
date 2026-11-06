@@ -35,13 +35,17 @@ def infer_launch(package, inputs):
 
     inputs maps a launch argument to the spec topic that it remaps.
     """
-    arguments = [DeclareLaunchArgument('weights', default_value='')]
+    arguments = [DeclareLaunchArgument('weights', default_value=''),
+                 DeclareLaunchArgument('transport', default_value='ros'),
+                 DeclareLaunchArgument('flux_device', default_value='cpu')]
     arguments += [DeclareLaunchArgument(name, default_value=topic)
                   for name, topic in inputs.items()]
     spec = str(Path(get_package_share_directory(package), 'config', 'spec.yaml'))
     node = Node(package='ml_bridge', executable='run', name=package, output='screen',
                 parameters=[{'spec': spec, 'model': f'{package}.inference',
-                             'weights': LaunchConfiguration('weights')}],
+                             'weights': LaunchConfiguration('weights'),
+                             'transport': LaunchConfiguration('transport'),
+                             'flux_device': LaunchConfiguration('flux_device')}],
                 remappings=[(topic, LaunchConfiguration(name))
                             for name, topic in inputs.items()])
     return LaunchDescription(arguments + [node])

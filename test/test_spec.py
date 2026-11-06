@@ -23,7 +23,7 @@
 import subprocess
 import sys
 
-from ml_bridge.spec import Decoder, load_spec
+from ml_bridge.spec import check_version, Decoder, load_spec, VERSION_FILE
 import numpy as np
 import pytest
 
@@ -41,8 +41,27 @@ def test_spec_options():
     assert spec.rule().reference == '/a'
 
 
+def test_hold_and_version():
+    spec = load_spec({'version': 3, 'inputs': {
+        '/a': {'type': 'x'}, '/b': {'type': 'y', 'align': 'hold', 'tolerance_ms': 5}}})
+    assert spec.version == 3 and spec.sync()['hold'] == ['/b'] and spec.rule().hold == {'/b'}
+
+
+def test_weights_of_another_version_are_refused(tmp_path):
+    spec = load_spec({'version': 2, 'inputs': {'/a': {'type': 'x'}}})
+    (tmp_path / 'run' / 'weights').mkdir(parents=True)
+    weights = tmp_path / 'run' / 'weights' / 'best.pt'
+    check_version(spec, weights)
+    (tmp_path / 'run' / VERSION_FILE).write_text('2\n')
+    check_version(spec, weights)
+    (tmp_path / 'run' / VERSION_FILE).write_text('1\n')
+    with pytest.raises(ValueError, match='version 1'):
+        check_version(spec, weights)
+
+
 @pytest.mark.parametrize('data,match', [
     ({'inputs': {}}, 'at least one'),
+    ({'inputs': {'/a': {'type': 'x', 'align': 'late'}}}, 'align'),
     ({'inputs': {'/a': {}}}, 'type is required'),
     ({'inputs': {'/a': {'type': 'x', 'tolerance': 1}}}, 'unknown keys'),
     ({'inputs': {'/a': {'type': 'x'}}, 'reference': '/b'}, 'reference'),
@@ -63,6 +82,6 @@ def test_images_become_rgb():
 
 
 def test_training_does_not_need_ros():
-    code = ("import sys; import ml_bridge.training; "
-            "assert 'rclpy' not in sys.modules, 'training imported rclpy'")
+    code = ('import sys; import ml_bridge.training; '
+            'assert "rclpy" not in sys.modules, "training imported rclpy"')
     subprocess.run([sys.executable, '-c', code], check=True)

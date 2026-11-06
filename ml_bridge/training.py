@@ -28,11 +28,12 @@ and the module trains on its own data. This module must not import rclpy.
 import argparse
 import importlib
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 from rosbag2_dataset.torch import BagDataset
 
-from .spec import Decoder, load_spec, Renamed
+from .spec import Decoder, load_spec, Renamed, VERSION_FILE
 
 
 def make_dataset(spec, bags, remap=None):
@@ -65,6 +66,9 @@ def main(argv=None):
     if args.bags:
         dataset = make_dataset(spec, args.bags, _remap(args.remap))
         logger.info(f'{len(dataset)} samples from {len(args.bags)} bags')
+    if args.out_dir:
+        Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+        (Path(args.out_dir) / VERSION_FILE).write_text(f'{spec.version}\n')
     context = SimpleNamespace(spec=spec, logger=logger, weights=args.weights,
                               out_dir=args.out_dir, bags=args.bags)
     importlib.import_module(args.model).train(dataset, context)

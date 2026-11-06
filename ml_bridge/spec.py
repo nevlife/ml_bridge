@@ -27,14 +27,17 @@ from rosbag2_dataset import image_to_numpy, SampleRule, Window
 import yaml
 
 MS = 1_000_000
-_INPUT_KEYS = {'type', 'tolerance_ms', 'optional', 'window'}
+VERSION_FILE = 'ml_bridge_spec_version'
+_INPUT_KEYS = {'type', 'tolerance_ms', 'optional', 'window', 'align'}
 _WINDOW_KEYS = {'every_ms', 'past', 'future', 'tolerance_ms'}
-_SPEC_KEYS = {'inputs', 'reference', 'time', 'max_wait_ms', 'output'}
+_SPEC_KEYS = {'version', 'inputs', 'reference', 'time', 'max_wait_ms', 'output'}
 _RGB = {'bgr8': [2, 1, 0], 'bgra8': [2, 1, 0], 'rgba8': [0, 1, 2]}
 
 
 def _image(message):
-    pixels = image_to_numpy(message)
+    pixels = getattr(message, 'device_pixels', None)
+    if pixels is None:
+        pixels = image_to_numpy(message)
     order = _RGB.get(message.encoding)
     return pixels if order is None else pixels[..., order]
 
@@ -57,6 +60,7 @@ class Input:
     tolerance_ns: int = 0
     optional: bool = False
     window: Window = None
+    hold: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ class Spec:
     max_wait_ns: int
     output_topic: str
     output_type: str
+    version: int = 0
 
     @property
     def topics(self):
@@ -85,6 +90,7 @@ class Spec:
                              if i.topic != self.reference},
             'optional': [name(i.topic) for i in self.inputs if i.optional],
             'windows': {name(i.topic): i.window for i in self.inputs if i.window},
+            'hold': [name(i.topic) for i in self.inputs if i.hold],
             'time_source': self.time,
         }
 
@@ -113,9 +119,12 @@ def load_spec(source):
             window = Window(every_ns=round(window['every_ms'] * MS),
                             past=window.get('past', 0), future=window.get('future', 0),
                             tolerance_ns=round(window.get('tolerance_ms', 0) * MS))
+        align = options.get('align', 'nearest')
+        if align not in ('nearest', 'hold'):
+            raise ValueError(f"inputs.{topic}: align must be 'nearest' or 'hold'")
         inputs.append(Input(topic, options['type'],
                             round(options.get('tolerance_ms', 0) * MS),
-                            bool(options.get('optional', False)), window))
+                            bool(options.get('optional', False)), window, align == 'hold'))
     reference = data.get('reference', inputs[0].topic)
     if reference not in {i.topic for i in inputs}:
         raise ValueError('spec: reference must be one of the inputs')
@@ -125,7 +134,20 @@ def load_spec(source):
     output = data.get('output') or {}
     _check_keys('output', output, {'topic', 'type'})
     return Spec(tuple(inputs), reference, time, round(data.get('max_wait_ms', 100) * MS),
-                output.get('topic', '~/output'), output.get('type'))
+                output.get('topic', '~/output'), output.get('type'),
+                int(data.get('version', 0)))
+
+
+def check_version(spec, weights):
+    """Refuse weights that training recorded for another spec version."""
+    for folder in Path(weights).resolve().parents:
+        record = folder / VERSION_FILE
+        if record.exists():
+            trained = int(record.read_text())
+            if trained != spec.version:
+                raise ValueError(f'{weights} was trained with spec version {trained}, '
+                                 f'this spec is version {spec.version}')
+            return
 
 
 class Renamed:
@@ -149,7 +171,8 @@ class Decoder:
 
     Images become HxW or HxWxC NumPy arrays; bgr8, bgra8, and rgba8 become RGB
     copies, other encodings stay views in their channel order. The same decoder runs
-    on bag samples and on live samples, so both give equal arrays.
+    on bag samples and on live samples, so both give equal arrays. A device image from
+    flux stays a tensor with the same channel order.
     """
 
     def __init__(self, spec):
